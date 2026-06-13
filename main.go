@@ -1,6 +1,10 @@
 package main
 
-import "github.com/gin-gonic/gin"
+import (
+	"os"
+
+	"github.com/gin-gonic/gin"
+)
 
 type User struct {
 	Username string `json:"username"`
@@ -16,6 +20,11 @@ func setupRouter() *gin.Engine {
 }
 
 func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8888"
+	}
+
 	router := setupRouter()
-	router.Run(":8888")
+	router.Run(":" + port)
 }

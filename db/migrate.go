@@ -52,7 +52,7 @@ func openDB(opts *MigrationOptions) (*sql.DB, error) {
 	return db, nil
 }
 
-func MigrateUp(opts *MigrationOptions) error {
+func MigrateUp(opts *MigrationOptions) (err error) {
 	if opts == nil {
 		opts = DefaultMigrationOptions()
 	}
@@ -61,12 +61,16 @@ func MigrateUp(opts *MigrationOptions) error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() {
+		if closeErr := db.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 
 	return goose.Up(db, opts.MigrationsDir)
 }
 
-func MigrateDown(opts *MigrationOptions) error {
+func MigrateDown(opts *MigrationOptions) (err error) {
 	if opts == nil {
 		opts = DefaultMigrationOptions()
 	}
@@ -75,12 +79,16 @@ func MigrateDown(opts *MigrationOptions) error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() {
+		if closeErr := db.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 
 	return goose.Down(db, opts.MigrationsDir)
 }
 
-func MigrateStatus(opts *MigrationOptions) error {
+func MigrateStatus(opts *MigrationOptions) (err error) {
 	if opts == nil {
 		opts = DefaultMigrationOptions()
 	}
@@ -89,12 +97,16 @@ func MigrateStatus(opts *MigrationOptions) error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() {
+		if closeErr := db.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 
 	return goose.Status(db, opts.MigrationsDir)
 }
 
-func MigrateReset(opts *MigrationOptions) error {
+func MigrateReset(opts *MigrationOptions) (err error) {
 	if opts == nil {
 		opts = DefaultMigrationOptions()
 	}
@@ -103,7 +115,11 @@ func MigrateReset(opts *MigrationOptions) error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() {
+		if closeErr := db.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
 
 	return goose.Reset(db, opts.MigrationsDir)
 }

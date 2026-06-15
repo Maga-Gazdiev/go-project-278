@@ -1,0 +1,42 @@
+package app
+
+import (
+	"context"
+	"fmt"
+
+	"project-3/internal/config"
+	linkhandler "project-3/internal/handler/link"
+	linkrepository "project-3/internal/repository/link"
+	linkservice "project-3/internal/service/link"
+
+	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+func Run() error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	ctx := context.Background()
+
+	pool, err := pgxpool.New(context.Background(), cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("create connection pool: %w", err)
+	}
+	defer pool.Close()
+
+	if err := pool.Ping(ctx); err != nil {
+		return fmt.Errorf("connect database: %w", err)
+	}
+
+	linkRepository := linkrepository.New(pool)
+	linkService := linkservice.NewService(linkRepository, cfg.BaseURL)
+	linkHandler := linkhandler.New(linkService)
+
+	router := gin.Default()
+	linkhandler.RegisterRoutes(router, linkHandler)
+
+	return router.Run(":" + cfg.Port)
+}

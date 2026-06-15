@@ -13,7 +13,7 @@ done
 
 if [ "$has_migrations" = true ]; then
 	echo "[run.sh] Running DB migrations"
-	goose -dir ./db/migrations postgres "${DATABASE_URL}" up
+	/app/bin/migrate up
 else
 	echo "[run.sh] No DB migrations found, skipping"
 fi

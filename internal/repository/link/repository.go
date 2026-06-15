@@ -34,6 +34,18 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (model.Link, error) 
 	return toModel(link), nil
 }
 
+func (r *Repository) GetByShortName(ctx context.Context, shortName string) (model.Link, error) {
+	link, err := r.queries.GetLinkByShortName(ctx, shortName)
+	if err != nil {
+		if stderrors.Is(err, pgx.ErrNoRows) {
+			return model.Link{}, apperrors.ErrLinkNotFound
+		}
+		return model.Link{}, err
+	}
+
+	return toModel(link), nil
+}
+
 func (r *Repository) List(ctx context.Context, from int, to int) ([]model.Link, error) {
 	limit := to - from + 1
 

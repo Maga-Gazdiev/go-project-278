@@ -7,8 +7,11 @@ import (
 
 	"project-3/internal/config"
 	linkhandler "project-3/internal/handler/link"
+	linkvisithandler "project-3/internal/handler/linkvisit"
 	linkrepository "project-3/internal/repository/link"
+	linkvisitrepository "project-3/internal/repository/linkvisit"
 	linkservice "project-3/internal/service/link"
+	linkvisitservice "project-3/internal/service/linkvisit"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -33,15 +36,21 @@ func Run() error {
 	}
 
 	linkRepository := linkrepository.New(pool)
+	linkVisitRepository := linkvisitrepository.New(pool)
 	linkService := linkservice.NewService(linkRepository, cfg.BaseURL)
-	linkHandler := linkhandler.New(linkService)
+	linkVisitService := linkvisitservice.NewService(linkVisitRepository)
+	linkHandler := linkhandler.New(linkService, linkVisitService)
+	linkVisitHandler := linkvisithandler.New(linkVisitService)
 
 	router := gin.Default()
+	// Если Render не за Cloudflare, заголовка нет, Gin продолжит брать X-Forwarded-For.
+	router.TrustedPlatform = gin.PlatformCloudflare
 	router.Use(corsMiddleware())
 	router.GET("/ping", func(c *gin.Context) {
 		c.String(http.StatusOK, "pong")
 	})
 	linkhandler.RegisterRoutes(router, linkHandler)
+	linkvisithandler.RegisterRoutes(router, linkVisitHandler)
 
 	return router.Run(":" + cfg.Port)
 }

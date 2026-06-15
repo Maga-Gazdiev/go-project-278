@@ -12,32 +12,41 @@ import (
 	"project-3/internal/model"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 )
 
 type LinkService interface {
 	GetByID(ctx context.Context, id int64) (model.Link, error)
+	GetByShortName(ctx context.Context, shortName string) (model.Link, error)
 	List(ctx context.Context, from int, to int) ([]model.Link, int64, error)
 	Create(ctx context.Context, link model.Link) (model.Link, error)
 	Update(ctx context.Context, link model.Link) (model.Link, error)
 	Delete(ctx context.Context, id int64) error
 }
 
+type LinkVisitService interface {
+	Create(ctx context.Context, visit model.LinkVisit) (model.LinkVisit, error)
+}
+
 type Handler struct {
-	service LinkService
+	service      LinkService
+	visitService LinkVisitService
 }
 
-type linkRequest struct {
-	OriginalUrl string `json:"original_url"`
-	ShortName   string `json:"short_name"`
+type createLinkPayload struct {
+	OriginalUrl string `json:"original_url" binding:"required,url"`
+	ShortName   string `json:"short_name" binding:"omitempty,min=3,max=32"`
 }
 
-func New(service LinkService) *Handler {
+func New(service LinkService, visitService LinkVisitService) *Handler {
 	return &Handler{
-		service: service,
+		service:      service,
+		visitService: visitService,
 	}
 }
 
 func RegisterRoutes(router gin.IRoutes, handler *Handler) {
+	router.GET("/r/:code", handler.Redirect)
 	router.GET("/api/links", handler.List)
 	router.POST("/api/links", handler.Create)
 	router.GET("/api/links/:id", handler.GetByID)
@@ -77,9 +86,37 @@ func (h *Handler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, links)
 }
 
+func (h *Handler) Redirect(c *gin.Context) {
+	const status = http.StatusFound
+
+	link, err := h.service.GetByShortName(c.Request.Context(), c.Param("code"))
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+
+	if _, err := h.visitService.Create(c.Request.Context(), model.LinkVisit{
+		LinkID:    link.ID,
+		IP:        c.ClientIP(),
+		UserAgent: c.GetHeader("User-Agent"),
+		Referer:   c.GetHeader("Referer"),
+		Status:    status,
+	}); err != nil {
+		writeError(c, err)
+		return
+	}
+
+	c.Redirect(status, link.OriginalUrl)
+}
+
 func parseRange(c *gin.Context) (int, int, bool) {
+	rawRange := c.Query("range")
+	if rawRange == "" {
+		rawRange = c.GetHeader("Range")
+	}
+
 	var values []int
-	if err := json.Unmarshal([]byte(c.Query("range")), &values); err != nil {
+	if err := json.Unmarshal([]byte(rawRange), &values); err != nil {
 		writeError(c, apperrors.ErrNotValidQuery)
 		return 0, 0, false
 	}
@@ -93,9 +130,8 @@ func parseRange(c *gin.Context) (int, int, bool) {
 }
 
 func (h *Handler) Create(c *gin.Context) {
-	var request linkRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	request, ok := bindLinkPayload(c)
+	if !ok {
 		return
 	}
 
@@ -117,9 +153,8 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 
-	var request linkRequest
-	if err := c.ShouldBindJSON(&request); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+	request, ok := bindLinkPayload(c)
+	if !ok {
 		return
 	}
 
@@ -134,6 +169,16 @@ func (h *Handler) Update(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, link)
+}
+
+func bindLinkPayload(c *gin.Context) (createLinkPayload, bool) {
+	var request createLinkPayload
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeBindError(c, err)
+		return createLinkPayload{}, false
+	}
+
+	return request, true
 }
 
 func (h *Handler) Delete(c *gin.Context) {
@@ -169,8 +214,52 @@ func writeError(c *gin.Context, err error) {
 	case stderrors.Is(err, apperrors.ErrLinkNotFound):
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 	case stderrors.Is(err, apperrors.ErrShortNameTaken):
-		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		writeFieldError(c, "short_name", "short name already in use")
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 	}
+}
+
+func writeBindError(c *gin.Context, err error) {
+	var validationErrors validator.ValidationErrors
+	if stderrors.As(err, &validationErrors) {
+		errorsByField := make(map[string]string, len(validationErrors))
+		for _, fieldError := range validationErrors {
+			field := validationFieldName(fieldError)
+			errorsByField[field] = validationErrorMessage(fieldError, field)
+		}
+
+		c.JSON(http.StatusUnprocessableEntity, gin.H{"errors": errorsByField})
+		return
+	}
+
+	c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+}
+
+func writeFieldError(c *gin.Context, field string, message string) {
+	c.JSON(http.StatusUnprocessableEntity, gin.H{
+		"errors": map[string]string{
+			field: message,
+		},
+	})
+}
+
+func validationFieldName(fieldError validator.FieldError) string {
+	switch fieldError.StructField() {
+	case "OriginalUrl":
+		return "original_url"
+	case "ShortName":
+		return "short_name"
+	default:
+		return fieldError.Field()
+	}
+}
+
+func validationErrorMessage(fieldError validator.FieldError, field string) string {
+	return fmt.Sprintf(
+		"Key: 'createLinkPayload.%s' Error:Field validation for '%s' failed on the '%s' tag",
+		field,
+		field,
+		fieldError.Tag(),
+	)
 }

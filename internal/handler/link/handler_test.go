@@ -19,6 +19,9 @@ type fakeLinkRepository struct {
 	getID       int64
 	getLink     model.Link
 	getErr      error
+	getCode     string
+	getCodeLink model.Link
+	getCodeErr  error
 	listLinks   []model.Link
 	listErr     error
 	listFrom    int
@@ -38,6 +41,11 @@ type fakeLinkRepository struct {
 func (r *fakeLinkRepository) GetByID(_ context.Context, id int64) (model.Link, error) {
 	r.getID = id
 	return r.getLink, r.getErr
+}
+
+func (r *fakeLinkRepository) GetByShortName(_ context.Context, shortName string) (model.Link, error) {
+	r.getCode = shortName
+	return r.getCodeLink, r.getCodeErr
 }
 
 func (r *fakeLinkRepository) List(_ context.Context, from int, to int) ([]model.Link, error) {
@@ -65,12 +73,26 @@ func (r *fakeLinkRepository) Delete(_ context.Context, id int64) error {
 	return r.deleteErr
 }
 
+type fakeLinkVisitService struct {
+	visitInput model.LinkVisit
+	visitErr   error
+}
+
+func (s *fakeLinkVisitService) Create(_ context.Context, visit model.LinkVisit) (model.LinkVisit, error) {
+	s.visitInput = visit
+	return visit, s.visitErr
+}
+
 func testRouter(repository linkservice.LinkRepositoryInterface) *gin.Engine {
+	return testRouterWithVisitService(repository, &fakeLinkVisitService{})
+}
+
+func testRouterWithVisitService(repository linkservice.LinkRepositoryInterface, visitService LinkVisitService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 
-	service := linkservice.NewService(repository, "http://localhost:8888/r")
+	service := linkservice.NewService(repository, "http://localhost:8888")
 	router := gin.New()
-	RegisterRoutes(router, New(service))
+	RegisterRoutes(router, New(service, visitService))
 
 	return router
 }
@@ -120,6 +142,65 @@ func TestListLinks(t *testing.T) {
 	}
 }
 
+func TestRedirectLink(t *testing.T) {
+	repository := &fakeLinkRepository{
+		getCodeLink: model.Link{
+			ID:          1,
+			OriginalUrl: "https://example.com/target",
+			ShortName:   "abc",
+			ShortUrl:    "http://localhost:8888/r/abc",
+		},
+	}
+	visitService := &fakeLinkVisitService{}
+
+	request := httptest.NewRequest(http.MethodGet, "/r/abc", nil)
+	request.RemoteAddr = "172.18.0.1:12345"
+	request.Header.Set("User-Agent", "curl/8.5.0")
+	request.Header.Set("Referer", "https://example.com/source")
+	response := httptest.NewRecorder()
+
+	testRouterWithVisitService(repository, visitService).ServeHTTP(response, request)
+
+	if response.Code != http.StatusFound {
+		t.Fatalf("expected status %d, got %d", http.StatusFound, response.Code)
+	}
+	if got := response.Header().Get("Location"); got != "https://example.com/target" {
+		t.Fatalf("expected redirect location %q, got %q", "https://example.com/target", got)
+	}
+	if repository.getCode != "abc" {
+		t.Fatalf("expected short name %q, got %q", "abc", repository.getCode)
+	}
+	if visitService.visitInput.LinkID != 1 {
+		t.Fatalf("expected visit link id 1, got %d", visitService.visitInput.LinkID)
+	}
+	if visitService.visitInput.IP != "172.18.0.1" {
+		t.Fatalf("expected visit ip %q, got %q", "172.18.0.1", visitService.visitInput.IP)
+	}
+	if visitService.visitInput.UserAgent != "curl/8.5.0" {
+		t.Fatalf("expected user agent %q, got %q", "curl/8.5.0", visitService.visitInput.UserAgent)
+	}
+	if visitService.visitInput.Referer != "https://example.com/source" {
+		t.Fatalf("expected referer %q, got %q", "https://example.com/source", visitService.visitInput.Referer)
+	}
+	if visitService.visitInput.Status != http.StatusFound {
+		t.Fatalf("expected visit status %d, got %d", http.StatusFound, visitService.visitInput.Status)
+	}
+}
+
+func TestRedirectLinkNotFound(t *testing.T) {
+	repository := &fakeLinkRepository{getCodeErr: apperrors.ErrLinkNotFound}
+	visitService := &fakeLinkVisitService{}
+
+	response := testRequest(testRouterWithVisitService(repository, visitService), http.MethodGet, "/r/missing", "")
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, response.Code)
+	}
+	if visitService.visitInput != (model.LinkVisit{}) {
+		t.Fatalf("expected no visit record, got %+v", visitService.visitInput)
+	}
+}
+
 func TestCreateLink(t *testing.T) {
 	repository := &fakeLinkRepository{
 		createLink: model.Link{ID: 1, OriginalUrl: "https://example.com/long-url", ShortName: "exmpl", ShortUrl: "http://localhost:8888/r/exmpl"},
@@ -143,6 +224,83 @@ func TestCreateLink(t *testing.T) {
 	}
 	if link.ID != 1 {
 		t.Fatalf("expected created link id 1, got %d", link.ID)
+	}
+}
+
+func TestCreateLinkGeneratesShortName(t *testing.T) {
+	repository := &fakeLinkRepository{}
+
+	response := testRequest(testRouter(repository), http.MethodPost, "/api/links", `{"original_url":"https://example.com/long-url"}`)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, response.Code)
+	}
+	if repository.createInput.OriginalUrl != "https://example.com/long-url" {
+		t.Fatalf("unexpected original url: %s", repository.createInput.OriginalUrl)
+	}
+	if repository.createInput.ShortName == "" {
+		t.Fatal("expected generated short name")
+	}
+	if repository.createInput.ShortUrl != "http://localhost:8888/r/"+repository.createInput.ShortName {
+		t.Fatalf("unexpected short url: %s", repository.createInput.ShortUrl)
+	}
+}
+
+func TestCreateLinkInvalidJSON(t *testing.T) {
+	repository := &fakeLinkRepository{}
+
+	response := testRequest(testRouter(repository), http.MethodPost, "/api/links", `{"original_url":`)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, response.Code)
+	}
+
+	var body map[string]string
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body["error"] != "invalid request" {
+		t.Fatalf("expected invalid request error, got %+v", body)
+	}
+}
+
+func TestCreateLinkInvalidOriginalURL(t *testing.T) {
+	repository := &fakeLinkRepository{}
+
+	response := testRequest(testRouter(repository), http.MethodPost, "/api/links", `{"original_url":"not-url","short_name":"valid"}`)
+
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected status %d, got %d", http.StatusUnprocessableEntity, response.Code)
+	}
+
+	var body struct {
+		Errors map[string]string `json:"errors"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !strings.Contains(body.Errors["original_url"], "'url' tag") {
+		t.Fatalf("expected original_url validation error, got %+v", body.Errors)
+	}
+}
+
+func TestCreateLinkInvalidShortName(t *testing.T) {
+	repository := &fakeLinkRepository{}
+
+	response := testRequest(testRouter(repository), http.MethodPost, "/api/links", `{"original_url":"https://example.com","short_name":"ab"}`)
+
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected status %d, got %d", http.StatusUnprocessableEntity, response.Code)
+	}
+
+	var body struct {
+		Errors map[string]string `json:"errors"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !strings.Contains(body.Errors["short_name"], "'min' tag") {
+		t.Fatalf("expected short_name validation error, got %+v", body.Errors)
 	}
 }
 
@@ -179,6 +337,26 @@ func TestUpdateLink(t *testing.T) {
 	}
 }
 
+func TestUpdateLinkInvalidOriginalURL(t *testing.T) {
+	repository := &fakeLinkRepository{}
+
+	response := testRequest(testRouter(repository), http.MethodPut, "/api/links/1", `{"original_url":"not-url","short_name":"valid"}`)
+
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected status %d, got %d", http.StatusUnprocessableEntity, response.Code)
+	}
+
+	var body struct {
+		Errors map[string]string `json:"errors"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !strings.Contains(body.Errors["original_url"], "'url' tag") {
+		t.Fatalf("expected original_url validation error, got %+v", body.Errors)
+	}
+}
+
 func TestDeleteLink(t *testing.T) {
 	repository := &fakeLinkRepository{}
 
@@ -210,8 +388,18 @@ func TestCreateLinkShortNameConflict(t *testing.T) {
 
 	response := testRequest(testRouter(repository), http.MethodPost, "/api/links", `{"original_url":"https://example.com","short_name":"exmpl"}`)
 
-	if response.Code != http.StatusConflict {
-		t.Fatalf("expected status %d, got %d", http.StatusConflict, response.Code)
+	if response.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected status %d, got %d", http.StatusUnprocessableEntity, response.Code)
+	}
+
+	var body struct {
+		Errors map[string]string `json:"errors"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Errors["short_name"] != "short name already in use" {
+		t.Fatalf("expected short_name conflict error, got %+v", body.Errors)
 	}
 }
 

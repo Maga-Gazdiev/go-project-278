@@ -14,6 +14,7 @@ import (
 
 type LinkRepositoryInterface interface {
 	GetByID(ctx context.Context, id int64) (model.Link, error)
+	GetByShortName(ctx context.Context, shortName string) (model.Link, error)
 	List(ctx context.Context, from int, to int) ([]model.Link, error)
 	Count(ctx context.Context) (int64, error)
 	Create(ctx context.Context, link model.Link) (model.Link, error)
@@ -29,12 +30,16 @@ type LinkService struct {
 func NewService(repository LinkRepositoryInterface, baseURL string) *LinkService {
 	return &LinkService{
 		repository: repository,
-		baseURL:    strings.TrimRight(baseURL, "/"),
+		baseURL:    redirectBaseURL(baseURL),
 	}
 }
 
 func (s *LinkService) GetByID(ctx context.Context, id int64) (model.Link, error) {
 	return s.repository.GetByID(ctx, id)
+}
+
+func (s *LinkService) GetByShortName(ctx context.Context, shortName string) (model.Link, error) {
+	return s.repository.GetByShortName(ctx, shortName)
 }
 
 func (s *LinkService) List(ctx context.Context, from int, to int) ([]model.Link, int64, error) {
@@ -108,6 +113,15 @@ func (s *LinkService) Delete(ctx context.Context, id int64) error {
 
 func (s *LinkService) shortURL(shortName string) string {
 	return s.baseURL + "/" + shortName
+}
+
+func redirectBaseURL(baseURL string) string {
+	baseURL = strings.TrimRight(baseURL, "/")
+	if strings.HasSuffix(baseURL, "/r") {
+		return baseURL
+	}
+
+	return baseURL + "/r"
 }
 
 func generateShortName() (string, error) {

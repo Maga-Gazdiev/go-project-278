@@ -2,6 +2,10 @@
 SELECT * FROM links
 WHERE id = $1 LIMIT 1;
 
+-- name: GetLinkByShortName :one
+SELECT * FROM links
+WHERE short_name = $1 LIMIT 1;
+
 -- name: GetLinks :many
 SELECT * FROM links;
 

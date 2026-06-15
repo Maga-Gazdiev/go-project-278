@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -15,7 +16,7 @@ import (
 
 type LinkService interface {
 	GetByID(ctx context.Context, id int64) (model.Link, error)
-	List(ctx context.Context, from int, to int) ([]model.Link, error)
+	List(ctx context.Context, from int, to int) ([]model.Link, int64, error)
 	Create(ctx context.Context, link model.Link) (model.Link, error)
 	Update(ctx context.Context, link model.Link) (model.Link, error)
 	Delete(ctx context.Context, id int64) error
@@ -65,12 +66,14 @@ func (h *Handler) List(c *gin.Context) {
 		return
 	}
 
-	links, err := h.service.List(c.Request.Context(), from, to)
+	links, total, err := h.service.List(c.Request.Context(), from, to)
 	if err != nil {
 		writeError(c, err)
 		return
 	}
 
+	c.Header("Access-Control-Expose-Headers", "Content-Range")
+	c.Header("Content-Range", fmt.Sprintf("links %d-%d/%d", from, to, total))
 	c.JSON(http.StatusOK, links)
 }
 

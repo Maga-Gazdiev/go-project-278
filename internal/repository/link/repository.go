@@ -35,9 +35,11 @@ func (r *Repository) GetByID(ctx context.Context, id int64) (model.Link, error) 
 }
 
 func (r *Repository) List(ctx context.Context, from int, to int) ([]model.Link, error) {
+	limit := to - from + 1
+
 	links, err := r.queries.ListLinks(ctx, generated.ListLinksParams{
-		ID:   int64(from),
-		ID_2: int64(to),
+		Limit:  int32(limit),
+		Offset: int32(from),
 	})
 	if err != nil {
 		return nil, err
@@ -49,6 +51,10 @@ func (r *Repository) List(ctx context.Context, from int, to int) ([]model.Link, 
 	}
 
 	return result, nil
+}
+
+func (r *Repository) Count(ctx context.Context) (int64, error) {
+	return r.queries.CountLinks(ctx)
 }
 
 func (r *Repository) Create(ctx context.Context, link model.Link) (model.Link, error) {

@@ -5,9 +5,13 @@ WHERE id = $1 LIMIT 1;
 -- name: GetLinks :many
 SELECT * FROM links;
 
+-- name: CountLinks :one
+SELECT count(*) FROM links;
+
 -- name: ListLinks :many
 SELECT * FROM links
-WHERE id BETWEEN $1 AND $2 ORDER BY original_url;
+ORDER BY original_url
+LIMIT $1 OFFSET $2;
 
 -- name: CreateLink :one
 INSERT INTO links (

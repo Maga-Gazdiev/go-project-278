@@ -15,6 +15,7 @@ import (
 type LinkRepositoryInterface interface {
 	GetByID(ctx context.Context, id int64) (model.Link, error)
 	List(ctx context.Context, from int, to int) ([]model.Link, error)
+	Count(ctx context.Context) (int64, error)
 	Create(ctx context.Context, link model.Link) (model.Link, error)
 	Update(ctx context.Context, link model.Link) (model.Link, error)
 	Delete(ctx context.Context, id int64) error
@@ -36,12 +37,22 @@ func (s *LinkService) GetByID(ctx context.Context, id int64) (model.Link, error)
 	return s.repository.GetByID(ctx, id)
 }
 
-func (s *LinkService) List(ctx context.Context, from int, to int) ([]model.Link, error) {
-	if from <= 0 || to <= 0 || from > to {
-		return nil, apperrors.ErrNotValidQuery
+func (s *LinkService) List(ctx context.Context, from int, to int) ([]model.Link, int64, error) {
+	if from < 0 || to < 0 || from > to {
+		return nil, 0, apperrors.ErrNotValidQuery
 	}
 
-	return s.repository.List(ctx, from, to)
+	links, err := s.repository.List(ctx, from, to)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	total, err := s.repository.Count(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return links, total, nil
 }
 
 func (s *LinkService) Create(ctx context.Context, link model.Link) (model.Link, error) {

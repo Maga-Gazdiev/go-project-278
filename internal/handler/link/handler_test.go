@@ -23,6 +23,8 @@ type fakeLinkRepository struct {
 	listErr     error
 	listFrom    int
 	listTo      int
+	countTotal  int64
+	countErr    error
 	createInput model.Link
 	createLink  model.Link
 	createErr   error
@@ -42,6 +44,10 @@ func (r *fakeLinkRepository) List(_ context.Context, from int, to int) ([]model.
 	r.listFrom = from
 	r.listTo = to
 	return r.listLinks, r.listErr
+}
+
+func (r *fakeLinkRepository) Count(_ context.Context) (int64, error) {
+	return r.countTotal, r.countErr
 }
 
 func (r *fakeLinkRepository) Create(_ context.Context, link model.Link) (model.Link, error) {
@@ -83,16 +89,23 @@ func testRequest(router http.Handler, method, path, body string) *httptest.Respo
 
 func TestListLinks(t *testing.T) {
 	repository := &fakeLinkRepository{
+		countTotal: 5,
 		listLinks: []model.Link{
 			{ID: 1, OriginalUrl: "https://example.com/one", ShortName: "one", ShortUrl: "http://localhost:8888/r/one"},
 			{ID: 2, OriginalUrl: "https://example.com/two", ShortName: "two", ShortUrl: "http://localhost:8888/r/two"},
 		},
 	}
 
-	response := testRequest(testRouter(repository), http.MethodGet, "/api/links?range=%5B1,2%5D", "")
+	response := testRequest(testRouter(repository), http.MethodGet, "/api/links?range=%5B0,1%5D", "")
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, response.Code)
+	}
+	if got := response.Header().Get("Content-Range"); got != "links 0-1/5" {
+		t.Fatalf("expected Content-Range %q, got %q", "links 0-1/5", got)
+	}
+	if got := response.Header().Get("Access-Control-Expose-Headers"); got != "Content-Range" {
+		t.Fatalf("expected Access-Control-Expose-Headers %q, got %q", "Content-Range", got)
 	}
 
 	var links []model.Link
@@ -102,8 +115,8 @@ func TestListLinks(t *testing.T) {
 	if len(links) != 2 {
 		t.Fatalf("expected 2 links, got %d", len(links))
 	}
-	if repository.listFrom != 1 || repository.listTo != 2 {
-		t.Fatalf("expected range [1, 2], got [%d, %d]", repository.listFrom, repository.listTo)
+	if repository.listFrom != 0 || repository.listTo != 1 {
+		t.Fatalf("expected range [0, 1], got [%d, %d]", repository.listFrom, repository.listTo)
 	}
 }
 

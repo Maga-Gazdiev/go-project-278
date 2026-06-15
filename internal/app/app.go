@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"project-3/internal/config"
 	linkhandler "project-3/internal/handler/link"
@@ -36,7 +37,34 @@ func Run() error {
 	linkHandler := linkhandler.New(linkService)
 
 	router := gin.Default()
+	router.Use(corsMiddleware())
 	linkhandler.RegisterRoutes(router, linkHandler)
 
 	return router.Run(":" + cfg.Port)
+}
+
+func corsMiddleware() gin.HandlerFunc {
+	allowedOrigins := map[string]struct{}{
+		"http://localhost:5173": {},
+		"http://127.0.0.1:5173": {},
+	}
+
+	return func(c *gin.Context) {
+		origin := c.GetHeader("Origin")
+		if _, ok := allowedOrigins[origin]; ok {
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Vary", "Origin")
+		}
+
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization, Range, X-Requested-With")
+		c.Header("Access-Control-Expose-Headers", "Content-Range")
+
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
+			return
+		}
+
+		c.Next()
+	}
 }

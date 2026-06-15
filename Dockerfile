@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 # 1) Build frontend
 FROM node:24-alpine AS frontend-builder
 WORKDIR /build/frontend
@@ -18,8 +16,7 @@ COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
   go mod download
 
-RUN --mount=type=cache,target=/go/pkg/mod \
-  go install github.com/pressly/goose/v3/cmd/goose@v3.27.1
+RUN go install github.com/pressly/goose/v3/cmd/goose@latest
 
 COPY . .
 
@@ -32,8 +29,6 @@ FROM alpine:3.22
 RUN apk add --no-cache ca-certificates tzdata bash caddy
 
 WORKDIR /app
-
-ENV PORT=8080
 
 COPY --from=backend-builder /build/app /app/bin/app
 COPY --from=frontend-builder \

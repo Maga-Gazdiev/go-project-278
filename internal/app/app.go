@@ -38,6 +38,9 @@ func Run() error {
 
 	router := gin.Default()
 	router.Use(corsMiddleware())
+	router.GET("/ping", func(c *gin.Context) {
+		c.String(http.StatusOK, "pong")
+	})
 	linkhandler.RegisterRoutes(router, linkHandler)
 
 	return router.Run(":" + cfg.Port)
